@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISS Tracker - Live Satellite Telemetry</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet.js Mapping Library -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <style>
+        :root {
+            --bg-dark: #070913;
+            --panel-glass: rgba(13, 17, 35, 0.7);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-cyan: #00e5ff;
+            --accent-cyan-glow: rgba(0, 229, 255, 0.4);
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --font-main: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            background-color: var(--bg-dark);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            overflow-x: hidden;
+            
+            /* Ambient NASA APOD Background */
+            background-image: linear-gradient(to bottom, rgba(7, 9, 19, 0.85), rgba(7, 9, 19, 0.95)), url('{{ apod_url }}');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+        }
+
+        .dashboard-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* Glassmorphic Panel Styles */
+        .glass-panel {
+            background: var(--panel-glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Header block */
+        header {
+            padding: 24px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        header h1 {
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 30%, var(--accent-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .live-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 6px 14px;
+            border-radius: 50px;
+            border: 1px solid var(--border-glass);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.active {
+            background-color: var(--accent-green);
+            box-shadow: 0 0 10px var(--accent-green);
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        .status-dot.error {
+            background-color: var(--accent-red);
+            box-shadow: 0 0 10px var(--accent-red);
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+
+        /* Telemetry Cards Grid */
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .card:hover {
+            border-color: rgba(0, 229, 255, 0.3);
+            box-shadow: 0 12px 40px -15px rgba(0, 229, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .card-header svg {
+            width: 18px;
+            height: 18px;
+            fill: var(--accent-cyan);
+        }
+
+        .card-value {
+            font-size: 24px;
+            font-weight: 600;
+            word-wrap: break-word;
+        }
+
+        .card-value.mono {
+            font-family: var(--font-mono);
+            color: var(--accent-cyan);
+            text-shadow: 0 0 10px var(--accent-cyan-glow);
+        }
+
+        .card-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Map and Main Section Layout */
+        .main-section {
+            display: grid;
+            grid-template-columns: 2.2fr 1.3fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .main-section {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .map-panel {
+            min-height: 480px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #map {
+            width: 100%;
+            flex-grow: 1;
+            min-height: 430px;
+            background-color: var(--bg-dark);
+        }
+
+        /* Custom Leaflet Dark Mode Map Edits */
+        .leaflet-container {
+            font-family: var(--font-main) !important;
+        }
+        
+        .leaflet-bar {
+            border: 1px solid var(--border-glass) !important;
+            box-shadow: none !important;
+        }
+        
+        .leaflet-bar a {
+            background-color: var(--panel-glass) !important;
+            color: var(--text-primary) !important;
+            border-bottom: 1px solid var(--border-glass) !important;
+            transition: all 0.2s;
+        }
+        
+        .leaflet-bar a:hover {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            color: var(--accent-cyan) !important;
+        }
+
+        /* Detail/Sidebar Panel */
+        .details-panel {
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .details-panel h2 {
+            font-size: 20px;
+            font-weight: 700;
+            border-bottom: 1px solid var(--border-glass);
+            padding-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .info-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .info-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .info-val {
+            font-size: 16px;
+            line-height: 1.5;
+            font-weight: 500;
+        }
+
+        .info-val.highlight {
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+
+        /* Satellite Icon on Map styling */
+        .satellite-marker {
+            position: relative;
+            width: 64px;
+            height: 64px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .satellite-svg {
+            width: 44px;
+            height: 44px;
+            filter: drop-shadow(0 0 6px var(--accent-cyan));
+            animation: spin-slow 30s linear infinite;
+            z-index: 2;
+        }
+
+        .pulse-ring {
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            border: 2px solid var(--accent-cyan);
+            border-radius: 50%;
+            background-color: transparent;
+            opacity: 0;
+            animation: pulse-wave 2.5s cubic-bezier(0.215, 0.610, 0.355, 1) infinite;
+            z-index: 1;
+        }
+
+        @keyframes spin-slow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse-wave {
+            0% { transform: scale(0.4); opacity: 0; }
+            50% { opacity: 0.4; }
+            100% { transform: scale(2.8); opacity: 0; }
+        }
+
+        /* APOD Banner Footer */
+        footer {
+            margin-top: auto;
+            width: 100%;
+            max-width: 1200px;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            color: var(--text-secondary);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        footer a {
+            color: var(--accent-cyan);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="dashboard-container">
+        
+        <!-- HEADER -->
+        <header class="glass-panel">
+            <h1>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-cyan);">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                    <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+                ISS Location Tracker
+            </h1>
+            <div class="live-badge">
+                <span id="live-status-dot" class="status-dot {% if error %}error{% else %}active{% endif %}"></span>
+                <span id="live-status-text">{% if error %}Connection Error{% else %}LIVE{% endif %}</span>
+            </div>
+        </header>
+
+        <!-- METRICS GRID -->
+        <div class="telemetry-grid">
+            
+            <!-- Coordinates -->
+            <div class="glass-panel card">
+                <div class="card-header">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                    </svg>
+                    Telemetry Coordinates
+                </div>
+                <div class="card-value mono">
+                    <span id="val-lat">{{ "%.4f"|format(lat) if lat else '0.0000' }}</span>, 
+                    <span id="val-lon">{{ "%.4f"|format(lon) if lon else '0.0000' }}</span>
+                </div>
+                <div class="card-desc">Geocentric coordinates showing real-time location. Updates every 5 seconds.</div>
+            </div>
+
+            <!-- Current Domain / Body of Water -->
+            <div class="glass-panel card">
+                <div class="card-header">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0l2.79-2.79C10.09 18.78 11.02 19 12 19c4.97 0 9-4.03 9-9s-4.03-9-9-9zm0 15c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+                    </svg>
+                    Current Zone
+                </div>
+                <div class="card-value" id="card-zone">
+                    {% if location_data.precise_location %}
+                    <span style="color: var(--accent-green);">Landmass</span>
+                    {% else %}
+                    <span style="color: var(--accent-cyan);">Oceanic</span>
+                    {% endif %}
+                </div>
+                <div class="card-desc" id="card-zone-desc">
+                    {% if location_data.precise_location %}
+                    Currently over land in {{ location_data.precise_location.country }}.
+                    {% else %}
+                    Cruising over the {{ location_data.ocean or 'water body' }}.
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Nearest Land Distance -->
+            <div class="glass-panel card">
+                <div class="card-header">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.4z"/>
+                    </svg>
+                    Proximity to Land
+                </div>
+                <div class="card-value mono" id="val-distance-card">
+                    {{ location_data.nearest_land.distance if location_data.nearest_land else '0.00' }} km
+                </div>
+                <div class="card-desc" id="val-land-desc">
+                    Nearest landmass: {{ location_data.nearest_land.place_name if location_data.nearest_land else 'N/A' }}.
+                </div>
+            </div>
+
+        </div>
+
+        <!-- MAIN LAYOUT: MAP + DETAILS -->
+        <div class="main-section">
+            
+            <!-- MAP PANEL -->
+            <div class="glass-panel map-panel">
+                <div id="map"></div>
+            </div>
+
+            <!-- DETAILS PANEL -->
+            <div class="glass-panel details-panel">
+                
+                <!-- Zone-specific details -->
+                <div id="precise-section" style="display: {% if location_data.precise_location %}block{% else %}none{% endif %};">
+                    <h2>📍 Precise Land Address</h2>
+                    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 18px;">
+                        <div class="info-group">
+                            <div class="info-label">Full Address</div>
+                            <div class="info-val" id="val-address">{{ location_data.precise_location.address if location_data.precise_location else 'N/A' }}</div>
+                        </div>
+                        <div class="info-group">
+                            <div class="info-label">City/Settlement</div>
+                            <div class="info-val highlight" id="val-city">{{ location_data.precise_location.city if location_data.precise_location else 'N/A' }}</div>
+                        </div>
+                        <div class="info-group">
+                            <div class="info-label">Country</div>
+                            <div class="info-val highlight" id="val-country">{{ location_data.precise_location.country if location_data.precise_location else 'N/A' }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ocean-section" style="display: {% if not location_data.precise_location %}block{% else %}none{% endif %};">
+                    <h2>🌊 Maritime Zone</h2>
+                    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 18px;">
+                        <div class="info-group">
+                            <div class="info-label">Body of Water</div>
+                            <div class="info-val highlight" id="val-ocean">{{ location_data.ocean if location_data.ocean else 'Ocean' }}</div>
+                        </div>
+                        <div class="info-group">
+                            <div class="info-label">Status</div>
+                            <div class="info-val" style="color: var(--text-secondary);">The space station is currently passing over water or a remote area where no civil street address is available.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Shared Fallback: Nearest Land Details -->
+                <div style="margin-top: 10px; border-top: 1px solid var(--border-glass); padding-top: 20px;">
+                    <h2>🗺️ Offline Land Mapping</h2>
+                    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 18px;">
+                        <div class="info-group">
+                            <div class="info-label">Nearest Land Station</div>
+                            <div class="info-val" id="val-land-loc">
+                                {% if location_data.nearest_land %}
+                                {{ location_data.nearest_land.place_name }}, {{ location_data.nearest_land.admin1 }} ({{ location_data.nearest_land.cc|upper }})
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="info-group">
+                            <div class="info-label">Exact Distance</div>
+                            <div class="info-val highlight" id="val-distance">
+                                {% if location_data.nearest_land %}
+                                {{ location_data.nearest_land.distance }} km away
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- FOOTER & APOD ATTRIBUTION -->
+        <footer class="glass-panel">
+            <div>
+                NASA APOD Background Layer. 
+                Learn more about today's image: <a href="https://apod.nasa.gov/apod/astropix.html" target="_blank">Astronomy Picture of the Day</a>
+            </div>
+            <div>
+                🛰️ Polling frequency: 5s
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- MAP SCRIPT -->
+    <script>
+        // Extract initial values injected by Jinja
+        const initialLat = {{ lat|default(0.0) }};
+        const initialLon = {{ lon|default(0.0) }};
+
+        // Initialize Map
+        const map = L.map('map', {
+            zoomControl: false,
+            attributionControl: true
+        }).setView([initialLat, initialLon], 3);
+
+        // Load Dark Matter Map Tiles
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 18,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        }).addTo(map);
+
+        // Place custom zoom controls
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // Define pulsing satellite marker HTML/SVG
+        const satelliteIcon = L.divIcon({
+            html: `
+                <div class="satellite-marker">
+                    <div class="pulse-ring"></div>
+                    <svg class="satellite-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor">
+                        <!-- Panels Left -->
+                        <rect x="4" y="22" width="14" height="20" rx="1.5" fill="#0284c7" stroke="var(--accent-cyan)" stroke-width="1.5"/>
+                        <line x1="4" y1="32" x2="18" y2="32" stroke="var(--accent-cyan)" stroke-width="1"/>
+                        
+                        <!-- Panels Right -->
+                        <rect x="46" y="22" width="14" height="20" rx="1.5" fill="#0284c7" stroke="var(--accent-cyan)" stroke-width="1.5"/>
+                        <line x1="46" y1="32" x2="60" y2="32" stroke="var(--accent-cyan)" stroke-width="1"/>
+                        
+                        <!-- Trusses -->
+                        <line x1="18" y1="32" x2="46" y2="32" stroke="#fff" stroke-width="2.5"/>
+                        
+                        <!-- Module Hub -->
+                        <rect x="25" y="25" width="14" height="14" rx="7" fill="#1e293b" stroke="#fff" stroke-width="2"/>
+                        <circle cx="32" cy="32" r="3" fill="var(--accent-cyan)"/>
+                        
+                        <!-- Antennas -->
+                        <line x1="32" y1="25" x2="32" y2="12" stroke="#fff" stroke-width="1.5"/>
+                        <circle cx="32" cy="12" r="2" fill="var(--accent-red)"/>
+                    </svg>
+                </div>
+            `,
+            className: 'custom-satellite-icon',
+            iconSize: [64, 64],
+            iconAnchor: [32, 32]
+        });
+
+        // Add Marker
+        const marker = L.marker([initialLat, initialLon], { icon: satelliteIcon }).addTo(map);
+
+        // Keep track of trajectory
+        let pathCoords = [[initialLat, initialLon]];
+        const polyline = L.polyline(pathCoords, {
+            color: 'var(--accent-cyan)',
+            weight: 2,
+            dashArray: '5, 8',
+            opacity: 0.7
+        }).addTo(map);
+
+        let userPanning = false;
+
+        // Detect if user drag/zoom the map to disable auto-centering
+        map.on('movestart', function () {
+            // Check if movement was caused by user interaction
+            if (map._drag && map._drag._moving) {
+                userPanning = true;
+            }
+        });
+
+        // Re-enable auto-centering if user double-clicks the map
+        map.on('dblclick', function() {
+            userPanning = false;
+            const curLatLng = marker.getLatLng();
+            map.panTo(curLatLng, { animate: true, duration: 1.5 });
+        });
+
+        function updateUI(data) {
+            if (data.error) {
+                document.getElementById('live-status-dot').className = 'status-dot error';
+                document.getElementById('live-status-text').innerText = 'Offline';
+                return;
+            }
+
+            document.getElementById('live-status-dot').className = 'status-dot active';
+            document.getElementById('live-status-text').innerText = 'LIVE';
+
+            const lat = data.lat;
+            const lon = data.lon;
+            const loc = data.location_data;
+
+            if (lat === null || lon === null) return;
+
+            // 1. Update coordinate cards
+            document.getElementById('val-lat').innerText = lat.toFixed(4) + '°';
+            document.getElementById('val-lon').innerText = lon.toFixed(4) + '°';
+
+            // 2. Move Marker and draw path
+            const newPos = [lat, lon];
+            marker.setLatLng(newPos);
+
+            // Add new position to path if coordinates moved
+            const lastPos = pathCoords[pathCoords.length - 1];
+            if (!lastPos || lastPos[0] !== lat || lastPos[1] !== lon) {
+                pathCoords.push(newPos);
+                polyline.setLatLngs(pathCoords);
+            }
+
+            // Auto-center map if user is not exploring/panning manually
+            if (!userPanning) {
+                map.panTo(newPos, { animate: true, duration: 1.2 });
+            }
+
+            // 3. Update Domain Information Card
+            const cardZone = document.getElementById('card-zone');
+            const cardZoneDesc = document.getElementById('card-zone-desc');
+            const preciseSection = document.getElementById('precise-section');
+            const oceanSection = document.getElementById('ocean-section');
+
+            if (loc && loc.precise_location) {
+                cardZone.innerHTML = '<span style="color: var(--accent-green);">Landmass</span>';
+                cardZoneDesc.innerText = `Currently passing over land in ${loc.precise_location.country || 'civil terrain'}.`;
+
+                preciseSection.style.display = 'block';
+                oceanSection.style.display = 'none';
+
+                document.getElementById('val-address').innerText = loc.precise_location.address || 'N/A';
+                document.getElementById('val-city').innerText = loc.precise_location.city || 'N/A';
+                document.getElementById('val-country').innerText = loc.precise_location.country || 'N/A';
+            } else {
+                cardZone.innerHTML = '<span style="color: var(--accent-cyan);">Oceanic</span>';
+                const bodyOfWater = (loc && loc.ocean) ? loc.ocean : 'Open Ocean';
+                cardZoneDesc.innerText = `Cruising over the ${bodyOfWater}.`;
+
+                preciseSection.style.display = 'none';
+                oceanSection.style.display = 'block';
+
+                document.getElementById('val-ocean').innerText = bodyOfWater;
+            }
+
+            // 4. Update Nearest Land Card & Section
+            if (loc && loc.nearest_land) {
+                document.getElementById('val-distance-card').innerText = loc.nearest_land.distance + ' km';
+                document.getElementById('val-land-desc').innerText = `Nearest landmass: ${loc.nearest_land.place_name}, ${loc.nearest_land.cc.toUpperCase()}`;
+
+                document.getElementById('val-land-loc').innerText = `${loc.nearest_land.place_name}, ${loc.nearest_land.admin1} (${loc.nearest_land.cc.toUpperCase()})`;
+                document.getElementById('val-distance').innerText = loc.nearest_land.distance + ' km away';
+            }
+        }
+
+        function pollPosition() {
+            fetch('/api/position')
+                .then(res => res.json())
+                .then(data => {
+                    updateUI(data);
+                })
+                .catch(err => {
+                    console.error("API polling failed:", err);
+                    document.getElementById('live-status-dot').className = 'status-dot error';
+                    document.getElementById('live-status-text').innerText = 'Reconnecting...';
+                });
+        }
+
+        // Poll position status every 5 seconds
+        setInterval(pollPosition, 5000);
+    </script>
+</body>
+
+</html>

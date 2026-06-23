@@ -1,0 +1,9 @@
+requests
+geopy
+certifi
+reverse_geocoder
+numpy
+scipy
+fastapi
+uvicorn
+jinja2
